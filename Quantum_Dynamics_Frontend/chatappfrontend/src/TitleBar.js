@@ -7,70 +7,77 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import { Link,Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router';
-import WebSocket from 'websocket';
 import { Client } from '@stomp/stompjs';
 
 function TitleBar({token , updateToken})
 {
     const location = useLocation();
 
-    const [Message,setMessage] = useState("");
+    const [Message,setMessage] = useState(null);
 
     // const socket = new WebSocket('ws://localhost:8080/ws');
 
-    const stompClient = new Client();
+    const [stompClient, setStompClient] = useState(null);
 
     useEffect(() => {
         const validateToken = async () => {
-            if (token!=null) {
-                try {
-                    // Send a request to the server to validate the token
-                    const response = await fetch('http://localhost:8080/validate', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${token}`,
-                        },
-                    });
+            try {
+                // Send a request to the server to validate the token
+                const response = await fetch('http://localhost:8080/validate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
 
-                    if (!response.ok) {
-                        updateToken(null);
-                    }
-                    
-                } catch (error) {
-                    console.error('Error validating token:', error);
+                if (!response.ok) {
+                    updateToken(null);
                 }
+
+            } catch (error) {
+                console.error('Error validating token:', error);
+                updateToken(null);
             }
         };
 
         validateToken();
 
-        stompClient.configure({
+        const stomp = new Client();
+
+        stomp.configure({
             brokerURL: 'ws://localhost:8080/ws',
             onConnect: () => {
-                stompClient.subscribe('/topic/loggedin', (message) => {
+                console.log('Connection made....');
+                stomp.subscribe('/topic/loggedin', (message) => {
                     setMessage(message);
                 });
 
-                stompClient.subscribe('/topic/disconnect', (message) => {
+                stomp.subscribe('/topic/disconnect', (message) => {
                     setMessage('Received disconnect message:', JSON.parse(message.body));
                 });
+
+                stomp.publish('/app/loggedin',{},JSON.stringify(sessionStorage.getItem('username')));
+            },
+            onStompError: (error) => {
+                console.error('STOMP error:', error);
             },
             debug: (msg) => console.log(msg),
-            reconnectDelay: 5000,
         });
 
-        stompClient.activate();
+        stomp.activate();
 
-        // Add event listener for tab/window close
-        window.addEventListener('beforeunload', handleBeforeUnload);
+        setStompClient(stomp);
+
+        console.log(stomp.state);
 
         return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-            stompClient.deactivate();
+            if (stomp.connected) {
+                stomp.deactivate();
+            }
         };
-
     }, [token]);
+
 
     const handleBeforeUnload = () => {
         // Send disconnect message to the server
@@ -79,6 +86,19 @@ function TitleBar({token , updateToken})
             body: JSON.stringify({ username: sessionStorage.getItem('username') }),
         });
     };
+
+    useEffect(() => {
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
+    }, [stompClient]);
+
+
+    useEffect(() => {
+        console.log(Message);
+    },[Message]);
+
 
     return(
         <>
